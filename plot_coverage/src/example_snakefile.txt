@@ -1,0 +1,86 @@
+FASTA = "dbases/chr22.fa.gz" # our genome fasta file (hg19)
+CHROMS = "dbases/chr22_length.txt" # our genome file for bedtools
+GENES = "dbases/knownGene_chr22.bed" # gene annotations for hg19
+
+CHIP = ['H1_h3k4me3_chr22', 
+        'H1_RNApolII_chr22', 
+        'H1_RNApolII_S5_chr22',
+        'Hela_RNApolII_S2_chr22']
+
+rule all:
+  input: expand("bedfiles/{chip}/coverage.bed", chip=CHIP)
+
+rule plot_coverage:
+  input:
+    coverage = "bedfiles/{chip}/coverage.bed"
+  output:
+    "plots/{chip}.pdf"
+  shell:
+    " src/plot_data.R {input} {output}"
+
+rule get_coverage:
+  input: 
+    windows = "bedfiles/tss_windows.bed",
+    bedgraph = "bedgraphs/{chip}.bedgraph"
+  output: 
+    coverage = "bedfiles/{chip}/coverage.bed"
+  shell:
+    """
+    bedtools map -a {input.windows} \
+      -b {input.bedgraph} \
+      -c 4 -o mean -null 0 > {output.coverage}
+    """
+
+rule prepare_windows:
+  input:
+    genes = GENES,
+    chroms = CHROMS,
+  output:
+    "bedfiles/tss_windows.bed"
+  shell:
+    "src/get_tss_windows.sh {input.genes} {input.chroms} {output}" 
+    
+rule make_bedgraphs:
+  input:
+    "bowtie/{chip}.bam"
+  output:
+    "bedgraphs/{chip}.bedgraph"
+  shell:
+    """
+    bedtools genomecov \
+      -ibam {input} \
+      -bg \
+      -g {CHROMS} > {output}
+    """
+
+rule bowtie_mapping:
+  input: 
+    fq = "raw_data/{chip}.fastq.gz", 
+    idx = "dbases/bowtie_idx/chr22.1.bt2"
+  output:
+    "bowtie/{chip}.bam"
+  params:
+    idx = "dbases/bowtie_idx/chr22", 
+  shell:
+    """
+    bowtie2 \
+      -x {params.idx} \
+      -U {input.fq} \
+      -S {output}.tmp
+
+    samtools sort {output}.tmp > {output}
+    samtools index {output}
+    """
+
+rule bowtie_index:
+  input: 
+    FASTA 
+  output:
+    "dbases/bowtie_idx/chr22.1.bt2"
+  params:
+    output_name = "dbases/bowtie_idx/chr22"
+  shell:
+    """
+    gunzip {input} -c > {input}.tmp 
+    bowtie2-build {input}.tmp {params.output_name} 
+    """
